@@ -1,0 +1,325 @@
+import os
+import csv
+from tkinter import Tk, StringVar, messagebox, filedialog
+from tkinter import ttk
+from collections import defaultdict
+from PIL import Image, ImageTk
+import tkinter as tk
+
+
+# === Data Processing Functions ===
+
+def read_lif_file(filepath):
+    """Read a .lif file and group its races by 'Final' markers."""
+    try:
+        with open(filepath, 'r') as file:
+            lines = file.readlines()
+    except FileNotFoundError:
+        return []
+
+    races, current_race = [], []
+    for line in lines:
+        line = line.strip()
+        if "Final" in line:
+            if current_race:
+                races.append(current_race)
+            current_race = [line]
+        elif current_race:
+            current_race.append(line)
+    if current_race:
+        races.append(current_race)
+    return races
+
+
+def assign_points(races, club_scores):
+    """Assign points to clubs based on race results."""
+    place_points = {1: 8, 2: 7, 3: 6, 4: 5, 5: 4, 6: 3, 7: 2, 8: 1}
+    for race in races:
+        results = []
+        for line in race[1:]:
+            parts = line.split(",")
+            if len(parts) > 5:
+                placing, club_name = parts[0].strip(), parts[5].strip()
+                if placing.upper() not in ("DQ", "DNS") and club_name:
+                    try:
+                        results.append((int(placing), club_name))
+                    except ValueError:
+                        continue
+        results.sort()
+
+        i = 0
+        while i < len(results):
+            place = results[i][0]
+            tied_clubs = [results[i][1]]
+            j = i + 1
+            while j < len(results) and results[j][0] == place:
+                tied_clubs.append(results[j][1])
+                j += 1
+
+            points = place_points.get(place, 1)
+            for club in tied_clubs:
+                club_scores[club] += points
+            i = j
+
+
+def save_results_to_csv(scores, output_file):
+    """Save results to CSV, sorted by points descending."""
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    with open(output_file, 'w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Rank', 'Club Name', 'Points'])
+        for rank, (club, points) in enumerate(sorted_scores, 1):
+            writer.writerow([rank, club, points])
+
+
+def should_include_folder(folder_name, year_filter):
+    """Check if folder matches selected year (if given)."""
+    if not year_filter:
+        return True
+    try:
+        folder_year = int(''.join(filter(str.isdigit, folder_name)))
+        return folder_year == int(year_filter)
+    except ValueError:
+        return False
+
+
+# === Compact GUI Class ===
+
+class RaceApp:
+    def __init__(self, root):
+        self.root = root
+        self.setup_window()
+        
+        self.source_var = StringVar()
+        self.dest_var = StringVar()
+        self.year_var = StringVar()
+
+        self.setup_styles()
+        self.build_gui()
+
+    def setup_window(self):
+        """Configure main window."""
+        self.root.title("Te Whanganui A Hei - Waka Ama Points")
+        self.root.geometry("800x600")
+        self.root.configure(bg='#f0f8ff')
+
+    def setup_styles(self):
+        """Configure modern styles."""
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        style.configure('Primary.TButton',
+                       background='#1e3a8a',
+                       foreground='white',
+                       font=('Arial', 10, 'bold'))
+        
+        style.configure('Title.TLabel',
+                       background='#f0f8ff',
+                       foreground='#1e3a8a',
+                       font=('Arial', 16, 'bold'))
+
+    def build_gui(self):
+        """Build compact GUI."""
+        main_frame = ttk.Frame(self.root, padding=20)
+        main_frame.pack(fill="both", expand=True)
+
+        # Header
+        self.build_header(main_frame)
+        
+        # Controls (compact)
+        self.build_controls(main_frame)
+        
+        # Results table
+        self.build_results_table(main_frame)
+        
+        # Export section
+        self.build_export_section(main_frame)
+
+    def build_header(self, parent):
+        """Build header with logo and title."""
+        header = ttk.Frame(parent)
+        header.pack(fill="x", pady=(0, 15))
+
+        # Logo
+        try:
+            logo_img = Image.open("3401e2ca-7e35-41b7-9fdf-2df6abbb8f79.png")
+            logo_img = logo_img.resize((80, 80), Image.LANCZOS)
+            self.logo_tk = ImageTk.PhotoImage(logo_img)
+            ttk.Label(header, image=self.logo_tk).pack()
+        except:
+            ttk.Label(header, text="🚣‍♂️", font=('Arial', 32)).pack()
+
+        ttk.Label(header, text="Te Whanganui A Hei", style='Title.TLabel').pack(pady=5)
+
+    def build_controls(self, parent):
+        """Build compact control section."""
+        controls = ttk.LabelFrame(parent, text="Configuration", padding=10)
+        controls.pack(fill="x", pady=(0, 10))
+
+        # Row 1: Source folder
+        row1 = ttk.Frame(controls)
+        row1.pack(fill="x", pady=2)
+        ttk.Button(row1, text="📁 Source Folder", command=self.select_source, 
+                  width=15).pack(side="left")
+        ttk.Label(row1, textvariable=self.source_var, relief="sunken", 
+                 padding=3).pack(side="left", fill="x", expand=True, padx=(10, 0))
+
+        # Row 2: Year filter and refresh
+        row2 = ttk.Frame(controls)
+        row2.pack(fill="x", pady=2)
+        ttk.Label(row2, text="Year:").pack(side="left")
+        year_combo = ttk.Combobox(row2, textvariable=self.year_var, width=8)
+        year_combo.pack(side="left", padx=(5, 10))
+        year_combo.bind("<KeyRelease>", lambda e: self.preview_data())
+        ttk.Button(row2, text="🔄 Refresh", command=self.preview_data).pack(side="left")
+
+    def build_results_table(self, parent):
+        """Build results preview table."""
+        table_frame = ttk.LabelFrame(parent, text="Results Preview", padding=10)
+        table_frame.pack(fill="both", expand=True, pady=(0, 10))
+
+        # Treeview
+        self.tree = ttk.Treeview(table_frame, columns=("rank", "club", "points"), 
+                                show="headings", height=12)
+        
+        self.tree.heading("rank", text="#")
+        self.tree.heading("club", text="Club Name")  
+        self.tree.heading("points", text="Points")
+        
+        self.tree.column("rank", width=40, anchor="center")
+        self.tree.column("club", width=350, anchor="w")
+        self.tree.column("points", width=80, anchor="center")
+
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+
+        self.tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+    def build_export_section(self, parent):
+        """Build export controls section."""
+        export_frame = ttk.LabelFrame(parent, text="Export Results", padding=10)
+        export_frame.pack(fill="x")
+
+        # Export controls row
+        export_row = ttk.Frame(export_frame)
+        export_row.pack(fill="x")
+
+        ttk.Button(export_row, text="💾 Save Location", command=self.select_dest,
+                  width=15).pack(side="left")
+        
+        ttk.Label(export_row, textvariable=self.dest_var, relief="sunken",
+                 padding=3).pack(side="left", fill="x", expand=True, padx=(10, 10))
+        
+        ttk.Button(export_row, text="📊 EXPORT", command=self.export_results,
+                  style='Primary.TButton', width=12).pack(side="right")
+
+        # Status
+        self.status_var = StringVar(value="Select source folder to begin")
+        ttk.Label(export_frame, textvariable=self.status_var, 
+                 foreground='#666').pack(pady=(5, 0))
+
+    def select_source(self):
+        """Select source folder."""
+        path = filedialog.askdirectory(title="Select Folder with .lif Files")
+        if path:
+            self.source_var.set(os.path.basename(path))
+            self.source_path = path
+            self.preview_data()
+
+    def select_dest(self):
+        """Select destination file."""
+        file_path = filedialog.asksaveasfilename(
+            title="Save Results CSV",
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv")]
+        )
+        if file_path:
+            self.dest_var.set(os.path.basename(file_path))
+            self.dest_path = file_path
+
+    def preview_data(self):
+        """Preview processed results."""
+        if not hasattr(self, 'source_path'):
+            return
+
+        try:
+            self.status_var.set("Processing...")
+            club_scores = self.process_folder(self.source_path, self.year_var.get())
+            sorted_scores = sorted(club_scores.items(), key=lambda x: x[1], reverse=True)
+
+            # Clear and populate table
+            for row in self.tree.get_children():
+                self.tree.delete(row)
+
+            if not sorted_scores:
+                self.tree.insert("", "end", values=("", "No results found", ""))
+                self.status_var.set("No .lif files found")
+            else:
+                for rank, (club, points) in enumerate(sorted_scores, 1):
+                    self.tree.insert("", "end", values=(rank, club, points))
+                self.status_var.set(f"Found {len(sorted_scores)} clubs")
+
+        except Exception as e:
+            self.status_var.set(f"Error: {str(e)}")
+
+    def export_results(self):
+        """Export results to CSV."""
+        if not hasattr(self, 'source_path'):
+            messagebox.showerror("Error", "Please select a source folder first.")
+            return
+        
+        if not hasattr(self, 'dest_path'):
+            messagebox.showerror("Error", "Please select where to save the CSV file.")
+            return
+
+        try:
+            self.status_var.set("Exporting...")
+            club_scores = self.process_folder(self.source_path, self.year_var.get())
+            save_results_to_csv(club_scores, self.dest_path)
+            
+            self.status_var.set("✅ Export successful!")
+            
+            if messagebox.askyesno("Success", f"Results exported!\n\nOpen folder?"):
+                self.open_folder(self.dest_path)
+                
+        except Exception as e:
+            self.status_var.set("❌ Export failed")
+            messagebox.showerror("Export Error", str(e))
+
+    def process_folder(self, source, year):
+        """Process .lif files in folder."""
+        club_scores = defaultdict(int)
+        
+        # Direct files
+        if should_include_folder(os.path.basename(source), year):
+            for f in os.listdir(source):
+                if f.endswith(".lif"):
+                    races = read_lif_file(os.path.join(source, f))
+                    assign_points(races, club_scores)
+
+        # Subfolders
+        for folder in os.listdir(source):
+            folder_path = os.path.join(source, folder)
+            if os.path.isdir(folder_path) and should_include_folder(folder, year):
+                for f in os.listdir(folder_path):
+                    if f.endswith(".lif"):
+                        races = read_lif_file(os.path.join(folder_path, f))
+                        assign_points(races, club_scores)
+                        
+        return club_scores
+
+    def open_folder(self, file_path):
+        """Open containing folder."""
+        try:
+            folder = os.path.dirname(file_path)
+            os.startfile(folder)
+        except Exception as e:
+            messagebox.showerror("Error", f"Cannot open folder: {e}")
+
+
+# === Run App ===
+if __name__ == "__main__":
+    root = Tk()
+    app = RaceApp(root)
+    root.mainloop()
