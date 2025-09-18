@@ -15,7 +15,9 @@ def read_lif_file(filepath):
     return [line.strip() for line in lines if line.strip()]
 
 def assign_points_from_lif(lif_lines):
-    """Extract club points from a .lif file based on 'Final' races, splitting points for combined clubs."""
+    """Extract club points from a .lif file based on 'Final' races, splitting points for combined clubs.
+       Includes DQ/DNS entries with 0 points so they appear in results.
+    """
     place_points = {1: 8, 2: 7, 3: 6, 4: 5, 5: 4, 6: 3, 7: 2, 8: 1}
     club_scores = defaultdict(int)
 
@@ -26,36 +28,49 @@ def assign_points_from_lif(lif_lines):
                 for race_line in current_race:
                     parts = race_line.split(",")
                     if len(parts) > 5:
-                        try:
-                            place = int(parts[0])
-                            club = parts[5].strip()
-                            if club:
-                                # Split combined clubs and divide points evenly
-                                clubs = [c.strip() for c in club.split("/")]
-                                points = place_points.get(place, 1)
-                                split_points = points / len(clubs)
-                                for c in clubs:
-                                    club_scores[c] += split_points
-                        except ValueError:
+                        place_str = parts[0].strip()
+                        club = parts[5].strip()
+                        if not club:
                             continue
+
+                        clubs = [c.strip() for c in club.split("/")]
+
+                        if place_str.isdigit():
+                            # Normal placing with points
+                            place = int(place_str)
+                            points = place_points.get(place, 1)
+                            split_points = points / len(clubs)
+                            for c in clubs:
+                                club_scores[c] += split_points
+                        else:
+                            # Handle DQ/DNS → add club with 0 points
+                            for c in clubs:
+                                club_scores[c] += 0
             current_race = []
         else:
             current_race.append(line)
-    # Process last race
+
+    # Process last race (same logic)
     for race_line in current_race:
         parts = race_line.split(",")
         if len(parts) > 5:
-            try:
-                place = int(parts[0])
-                club = parts[5].strip()
-                if club:
-                    clubs = [c.strip() for c in club.split("/")]
-                    points = place_points.get(place, 1)
-                    split_points = points / len(clubs)
-                    for c in clubs:
-                        club_scores[c] += split_points
-            except ValueError:
+            place_str = parts[0].strip()
+            club = parts[5].strip()
+            if not club:
                 continue
+
+            clubs = [c.strip() for c in club.split("/")]
+
+            if place_str.isdigit():
+                place = int(place_str)
+                points = place_points.get(place, 1)
+                split_points = points / len(clubs)
+                for c in clubs:
+                    club_scores[c] += split_points
+            else:
+                for c in clubs:
+                    club_scores[c] += 0
+
     return club_scores
 
 class WakaAmaApp(tk.Tk):
@@ -156,3 +171,4 @@ class WakaAmaApp(tk.Tk):
 if __name__ == "__main__":
     app = WakaAmaApp()
     app.mainloop()
+
