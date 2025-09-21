@@ -1,72 +1,40 @@
 import os
-import tkinter as tk
-from tkinter import scrolledtext
+from tkinter import filedialog, Tk, messagebox
 
-# Base folder where your WakaNats folders are stored
-BASE_PATH = r"C:\Users\qle78\OneDrive - Papatoetoe High School\Documents\DTP3\Waka Ama\3.7B resource files\3.7B resource files"
+# Function to read a .lif file
+def read_lif_file(filepath):
+    """Read a .lif file and return lines (keeps all lines)."""
+    try:
+        with open(filepath, 'r', encoding="latin-1") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        return []
+    return [line.strip() for line in lines if line.strip()]
 
-class WakaAmaApp(tk.Tk):
-    def __init__(self):
-        super().__init__()
+# Hide the main Tkinter window
+root = Tk()
+root.withdraw()
 
-        # Main window setup
-        self.title("Waka Ama Games")
-        self.geometry("450x350")
-        self.configure(bg="#e6f7ff")  # Light blue background
-        self.selected_year = None
+# Ask the user to select a folder
+folder = filedialog.askdirectory(title="Select Folder Containing .lif Files")
 
-        # Show main interface
-        self.show_interface()
+if not folder:
+    messagebox.showinfo("No Folder Selected", "No folder was selected. Exiting.")
+else:
+    # List all files in the folder that end with .lif (case-insensitive)
+    lif_files = [f for f in os.listdir(folder) if f.lower().endswith(".lif")]
+    count = len(lif_files)
 
-    # Clear all widgets
-    def clear_screen(self):
-        for widget in self.winfo_children():
-            widget.destroy()
+    # Show the result
+    messagebox.showinfo("LIF File Count", f"Number of .lif files in the folder:\n{count}")
+    print(f"Folder: {folder}")
+    print(f".lif files found ({count}):\n")
 
-    # Analyze the selected year
-    def analyze_year(self, year):
-        self.selected_year = year
-        folder = os.path.join(BASE_PATH, f"WakaNats{year}")
-
-        self.result_text.delete(1.0, tk.END)  # Clear previous results
-
-        if os.path.exists(folder):
-            files = os.listdir(folder)
-            lif_files = [file for file in files if file.lower().endswith('.lif')]
-            self.result_text.insert(tk.END, f"Found {len(lif_files)} .lif files in {folder}\n")
-            for f in lif_files:
-                self.result_text.insert(tk.END, f"{f}\n")
-        else:
-            self.result_text.insert(tk.END, f"Folder '{folder}' was not found\n")
-
-    # Show interface
-    def show_interface(self):
-        self.clear_screen()
-
-        # Title
-        tk.Label(self, text="Waka Ama Games", font=("Arial", 18, "bold"), bg="#e6f7ff").pack(pady=15)
-
-        # Year selection frame
-        year_frame = tk.Frame(self, bg="#cceeff", padx=10, pady=10)
-        year_frame.pack(pady=10, fill="x", padx=20)
-
-        tk.Label(year_frame, text="Select a year to analyze:", font=("Arial", 14), bg="#cceeff").pack(pady=5)
-
-        tk.Button(year_frame, text="2017", font=("Arial", 12), width=20, bg="#99ddff",
-                  command=lambda: self.analyze_year("2017")).pack(pady=5)
-        tk.Button(year_frame, text="2018", font=("Arial", 12), width=20, bg="#99ddff",
-                  command=lambda: self.analyze_year("2018")).pack(pady=5)
-
-        # Result area
-        result_frame = tk.Frame(self, bg="#f0f8ff", padx=10, pady=10)
-        result_frame.pack(pady=10, fill="both", expand=True, padx=20)
-
-        tk.Label(result_frame, text="Results:", font=("Arial", 14), bg="#f0f8ff").pack(anchor="w")
-
-        self.result_text = scrolledtext.ScrolledText(result_frame, width=50, height=10, font=("Arial", 10))
-        self.result_text.pack(fill="both", expand=True)
-
-# Start the program
-if __name__ == "__main__":
-    app = WakaAmaApp()
-    app.mainloop()
+    # Read and print contents of each .lif file
+    for f in lif_files:
+        filepath = os.path.join(folder, f)
+        lif_lines = read_lif_file(filepath)
+        print(f"--- {f} ---")
+        for line in lif_lines:
+            print(line)
+        print("\n")  # Add a blank line between files
